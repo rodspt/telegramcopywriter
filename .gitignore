@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Sessions do Telegram
+sessions/
+*.session
+*.session-journal
+
+# Variáveis de ambiente
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Vídeos baixados
+videos_data/
+videos/
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Scripts temporários de configuração
+configure-postgres.sh
+init-db.sh
+migrate_file_size.py
+
+# Arquivos temporários do sistema
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# Banco de dados local (se houver)
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos de backup
+*.backup
+*.dump
