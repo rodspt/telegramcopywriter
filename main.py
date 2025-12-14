@@ -4,6 +4,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram_client import TelegramClient
 from video_downloader import VideoDownloader
+from clear_session import clear_session
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -50,7 +51,32 @@ async def main():
     
     # Conectar ao Telegram
     client = TelegramClient(api_id, api_hash)
-    await client.connect()
+    
+    try:
+        await client.connect()
+    except Exception as e:
+        error_str = str(e).lower()
+        # Verificar se é erro de sessão locked
+        if "locked" in error_str or "database is locked" in error_str:
+            print("\n⚠️  Sessão bloqueada detectada!")
+            print("🧹 Limpando sessão automaticamente...")
+            print("=" * 60)
+            
+            # Limpar a sessão
+            clear_session(client.session_name)
+            
+            # Tentar reconectar após limpar a sessão
+            print("\n🔄 Tentando conectar novamente...")
+            try:
+                await client.connect()
+                print("✅ Reconectado com sucesso após limpar a sessão!")
+            except Exception as retry_error:
+                print(f"\n❌ Erro ao reconectar após limpar a sessão: {retry_error}")
+                print("💡 Você precisará autenticar novamente na próxima execução.")
+                return
+        else:
+            # Re-raise outros erros
+            raise
     
     try:
         downloader = VideoDownloader(client.client, CHANNEL_NAME)
