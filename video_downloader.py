@@ -211,6 +211,14 @@ class VideoDownloader:
 
     async def _resolve_chat(self):
         """Resolve o chat/canal antes de buscar mensagens"""
+        # Verificar se é bot (bots têm limitações)
+        is_bot = False
+        try:
+            me = await self.client.get_me()
+            is_bot = me.is_bot if hasattr(me, 'is_bot') else False
+        except:
+            pass
+        
         # Normalizar o channel_name para int se possível
         try:
             channel_id = int(self.channel_name)
@@ -225,30 +233,58 @@ class VideoDownloader:
         except Exception as e:
             error_str = str(e).lower()
             if "peer id invalid" in error_str or "chat not found" in error_str or "not found" in error_str:
-                # Tentar resolver usando get_dialogs primeiro
-                print("⚠️  Tentando resolver chat através dos diálogos...")
-                try:
-                    async for dialog in self.client.get_dialogs():
-                        # Comparar IDs (tanto int quanto string)
-                        chat_id = dialog.chat.id
-                        if (channel_id is not None and chat_id == channel_id) or \
-                           (str(chat_id) == str(self.channel_name)) or \
-                           (chat_id == self.channel_name):
-                            print(f"✅ Chat encontrado nos diálogos: {dialog.chat.title or 'Sem título'} (ID: {chat_id})")
-                            return dialog.chat
+                # Bots não podem usar get_dialogs(), então pular essa tentativa
+                if is_bot:
+                    print("⚠️  Bot detectado - não é possível usar get_dialogs()")
+                    print("💡 Para bots acessarem canais privados, o bot precisa ser administrador do canal")
+                    print("   Para canais públicos, use o username (ex: @canal) em vez do ID")
                     
-                    # Se não encontrou, tentar novamente com get_chat usando o ID normalizado
+                    # Tentar novamente com ID normalizado
                     if channel_id is not None:
                         print(f"⚠️  Tentando novamente com ID normalizado: {channel_id}")
                         try:
                             chat = await self.client.get_chat(channel_id)
                             print(f"✅ Chat resolvido com ID normalizado: {chat.title or 'Sem título'}")
                             return chat
-                        except Exception:
-                            pass
-                            
-                except Exception as dialog_error:
-                    print(f"⚠️  Erro ao buscar diálogos: {dialog_error}")
+                        except Exception as retry_error:
+                            print(f"❌ Erro ao acessar canal: {retry_error}")
+                            raise ValueError(
+                                f"Não foi possível resolver o chat/canal '{self.channel_name}'. "
+                                f"Bots só podem acessar:\n"
+                                f"  1. Canais públicos (use username como @canal)\n"
+                                f"  2. Canais privados onde o bot é administrador\n"
+                                f"  3. Verifique se o bot é administrador do canal"
+                            )
+                    else:
+                        raise ValueError(
+                            f"Não foi possível resolver o chat/canal '{self.channel_name}'. "
+                            f"Bots só podem acessar canais públicos (use @username) ou canais onde são administradores."
+                        )
+                else:
+                    # Para usuários, tentar resolver usando get_dialogs
+                    print("⚠️  Tentando resolver chat através dos diálogos...")
+                    try:
+                        async for dialog in self.client.get_dialogs():
+                            # Comparar IDs (tanto int quanto string)
+                            chat_id = dialog.chat.id
+                            if (channel_id is not None and chat_id == channel_id) or \
+                               (str(chat_id) == str(self.channel_name)) or \
+                               (chat_id == self.channel_name):
+                                print(f"✅ Chat encontrado nos diálogos: {dialog.chat.title or 'Sem título'} (ID: {chat_id})")
+                                return dialog.chat
+                        
+                        # Se não encontrou, tentar novamente com get_chat usando o ID normalizado
+                        if channel_id is not None:
+                            print(f"⚠️  Tentando novamente com ID normalizado: {channel_id}")
+                            try:
+                                chat = await self.client.get_chat(channel_id)
+                                print(f"✅ Chat resolvido com ID normalizado: {chat.title or 'Sem título'}")
+                                return chat
+                            except Exception:
+                                pass
+                                
+                    except Exception as dialog_error:
+                        print(f"⚠️  Erro ao buscar diálogos: {dialog_error}")
             
             raise ValueError(f"Não foi possível resolver o chat/canal '{self.channel_name}': {e}")
 

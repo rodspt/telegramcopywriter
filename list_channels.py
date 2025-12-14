@@ -13,27 +13,66 @@ async def list_channels():
     print("📱 Listando Canais do Telegram")
     print("=" * 60)
     
-    # Obter credenciais do Telegram
+    # Obter credenciais do Telegram (priorizar bot_token se disponível)
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     api_id = os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TELEGRAM_API_HASH")
     
-    if not api_id or not api_hash:
-        print("❌ Erro: TELEGRAM_API_ID e TELEGRAM_API_HASH devem estar configurados!")
+    # Verificar se bot_token está configurado
+    if bot_token:
+        bot_token = bot_token.strip()
+        if len(bot_token) < 10:
+            print("❌ Erro: TELEGRAM_BOT_TOKEN parece inválido (muito curto)!")
+            return
+        print("🤖 Usando autenticação via Bot Token")
+        # IMPORTANTE: Pyrogram ainda precisa de API_ID/API_HASH para novas autorizações mesmo com bot_token
+        if api_id and api_hash:
+            try:
+                api_id_int = int(api_id)
+                client = Client(
+                    "telegram_session",
+                    bot_token=bot_token,
+                    api_id=api_id_int,
+                    api_hash=api_hash,
+                    workdir="sessions"
+                )
+            except ValueError:
+                print("⚠️  Aviso: TELEGRAM_API_ID inválido, tentando apenas com bot_token...")
+                client = Client(
+                    "telegram_session",
+                    bot_token=bot_token,
+                    workdir="sessions"
+                )
+        else:
+            print("⚠️  Aviso: TELEGRAM_API_ID e TELEGRAM_API_HASH são recomendados mesmo com bot_token")
+            client = Client(
+                "telegram_session",
+                bot_token=bot_token,
+                workdir="sessions"
+            )
+    elif api_id and api_hash:
+        # Fallback para autenticação via API_ID/API_HASH
+        try:
+            api_id = int(api_id)
+        except ValueError:
+            print("❌ Erro: TELEGRAM_API_ID deve ser um número!")
+            return
+        print("👤 Usando autenticação via API ID/API Hash")
+        client = Client(
+            "telegram_session",
+            api_id=api_id,
+            api_hash=api_hash,
+            workdir="sessions"
+        )
+    else:
+        print("❌ Erro: É necessário configurar TELEGRAM_BOT_TOKEN OU (TELEGRAM_API_ID e TELEGRAM_API_HASH)!")
+        print("\nOpção 1 - Bot Token (RECOMENDADO):")
+        print("   Adicione no arquivo .env: TELEGRAM_BOT_TOKEN=seu_bot_token")
+        print("\nOpção 2 - API ID/API Hash:")
+        print("   Adicione no arquivo .env:")
+        print("   TELEGRAM_API_ID=seu_api_id")
+        print("   TELEGRAM_API_HASH=seu_api_hash")
         return
-    
-    try:
-        api_id = int(api_id)
-    except ValueError:
-        print("❌ Erro: TELEGRAM_API_ID deve ser um número!")
-        return
-    
-    # Conectar ao Telegram
-    client = Client(
-        "telegram_session",
-        api_id=api_id,
-        api_hash=api_hash,
-        workdir="sessions"
-    )
     
     try:
         await client.start()

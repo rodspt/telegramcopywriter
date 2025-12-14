@@ -4,24 +4,77 @@ import os
 from typing import Optional
 
 class TelegramClient:
-    def __init__(self, api_id: int, api_hash: str, session_name: str = "telegram_session"):
+    def __init__(self, bot_token: Optional[str] = None, api_id: Optional[int] = None, api_hash: Optional[str] = None, session_name: str = "telegram_session"):
+        self.bot_token = bot_token
         self.api_id = api_id
         self.api_hash = api_hash
         self.session_name = session_name
         self.client: Optional[Client] = None
+        self.is_bot = bot_token is not None
 
     async def connect(self):
-        """Conecta ao Telegram"""
+        """Conecta ao Telegram usando bot_token (se disponível) ou API_ID/API_HASH"""
         session_path = f"sessions/{self.session_name}"
-        self.client = Client(
-            self.session_name,
-            api_id=self.api_id,
-            api_hash=self.api_hash,
-            workdir="sessions"
-        )
-        await self.client.start()
-        print("✅ Conectado ao Telegram com sucesso!")
-        return self.client
+        
+        if self.bot_token:
+            # Autenticação via bot token (não expira, mais simples)
+            # IMPORTANTE: Pyrogram ainda precisa de api_id e api_hash para novas autorizações
+            if self.api_id and self.api_hash:
+                self.client = Client(
+                    self.session_name,
+                    bot_token=self.bot_token,
+                    api_id=self.api_id,
+                    api_hash=self.api_hash,
+                    workdir="sessions"
+                )
+            else:
+                # Tentar apenas com bot_token (pode funcionar se já houver sessão salva)
+                self.client = Client(
+                    self.session_name,
+                    bot_token=self.bot_token,
+                    workdir="sessions"
+                )
+            print("🤖 Conectando como bot...")
+        elif self.api_id and self.api_hash:
+            # Autenticação via API ID/API Hash (requer telefone e código)
+            self.client = Client(
+                self.session_name,
+                api_id=self.api_id,
+                api_hash=self.api_hash,
+                workdir="sessions"
+            )
+            print("👤 Conectando como usuário...")
+        else:
+            raise ValueError("É necessário fornecer bot_token OU api_id e api_hash")
+        
+        try:
+            await self.client.start()
+            if self.is_bot:
+                bot_info = await self.client.get_me()
+                print(f"✅ Conectado ao Telegram como bot: @{bot_info.username}")
+            else:
+                print("✅ Conectado ao Telegram com sucesso!")
+            return self.client
+        except Exception as e:
+            error_str = str(e).lower()
+            error_msg = str(e)
+            
+            # Verificar se é erro de auth key not found
+            is_auth_error = (
+                "auth key not found" in error_str or
+                "auth key" in error_str or
+                "404" in error_msg or
+                "transport error" in error_str or
+                "server sent transport error" in error_str
+            )
+            
+            if is_auth_error:
+                # Re-lançar o erro para que seja tratado no main.py
+                # O main.py vai limpar a sessão e tentar novamente
+                raise Exception(f"Erro de autenticação: {error_msg}")
+            else:
+                # Re-lançar outros erros normalmente
+                raise
 
     async def disconnect(self):
         """Desconecta do Telegram"""

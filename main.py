@@ -30,35 +30,98 @@ async def main():
     print("📱 Telegram Video Downloader")
     print("=" * 60)
     
-    # Obter credenciais do Telegram
+    # Obter credenciais do Telegram (priorizar bot_token se disponível)
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     api_id = os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TELEGRAM_API_HASH")
     
-    if not api_id or not api_hash:
-        print("❌ Erro: TELEGRAM_API_ID e TELEGRAM_API_HASH devem estar configurados!")
-        print("\nPara obter suas credenciais:")
-        print("1. Acesse https://my.telegram.org/apps")
-        print("2. Faça login com sua conta do Telegram")
-        print("3. Crie um aplicativo e copie o API ID e API Hash")
-        print("4. Configure as variáveis de ambiente no arquivo .env")
+    # Verificar se bot_token está configurado
+    if bot_token:
+        bot_token = bot_token.strip()
+        if len(bot_token) < 10:
+            print("❌ Erro: TELEGRAM_BOT_TOKEN parece inválido (muito curto)!")
+            return
+        print("🤖 Usando autenticação via Bot Token (não expira)")
+        print("⚠️  IMPORTANTE: Bots têm limitações no Telegram:")
+        print("   - Bots só podem acessar canais públicos (use @username) ou canais privados onde são administradores")
+        print("   - Se o canal for privado, adicione o bot como administrador nas configurações do canal")
+        print("   - Se não funcionar, considere usar TELEGRAM_API_ID/API_HASH (autenticação de usuário)")
+        # IMPORTANTE: Pyrogram ainda precisa de API_ID/API_HASH para novas autorizações mesmo com bot_token
+        if not api_id or not api_hash:
+            print("❌ Erro: TELEGRAM_API_ID e TELEGRAM_API_HASH são obrigatórios mesmo com bot_token!")
+            print("   Eles são necessários para novas autorizações no Pyrogram.")
+            print("\n💡 Configure também no arquivo .env:")
+            print("   TELEGRAM_API_ID=seu_api_id")
+            print("   TELEGRAM_API_HASH=seu_api_hash")
+            print("\n   Para obter:")
+            print("   1. Acesse https://my.telegram.org/apps")
+            print("   2. Faça login e crie um aplicativo")
+            print("   3. Copie o API ID e API Hash")
+            return
+        
+        try:
+            api_id_int = int(api_id)
+        except ValueError:
+            print("❌ Erro: TELEGRAM_API_ID deve ser um número!")
+            return
+        
+        # Limpar sessão preventivamente ao usar bot_token (pode haver sessão incompatível de autenticação de usuário)
+        # Isso evita erros de "auth key not found" quando há sessão antiga incompatível
+        session_cleared = clear_session("telegram_session")
+        if session_cleared:
+            print("✅ Sessão antiga removida (será criada nova sessão para bot)")
+        else:
+            print("ℹ️  Nenhuma sessão antiga encontrada (criando nova sessão)")
+        
+        client = TelegramClient(bot_token=bot_token, api_id=api_id_int, api_hash=api_hash)
+    elif api_id and api_hash:
+        # Fallback para autenticação via API_ID/API_HASH
+        try:
+            api_id_int = int(api_id)
+        except ValueError:
+            print("❌ Erro: TELEGRAM_API_ID deve ser um número!")
+            return
+        print("👤 Usando autenticação via API ID/API Hash")
+        client = TelegramClient(api_id=api_id_int, api_hash=api_hash)
+    else:
+        print("❌ Erro: É necessário configurar TELEGRAM_BOT_TOKEN OU (TELEGRAM_API_ID e TELEGRAM_API_HASH)!")
+        print("\nOpção 1 - Bot Token (RECOMENDADO - não expira):")
+        print("   1. Abra o Telegram e procure por @BotFather")
+        print("   2. Envie /newbot para criar um bot")
+        print("   3. Copie o token do bot")
+        print("   4. Configure no arquivo .env:")
+        print("      TELEGRAM_BOT_TOKEN=seu_bot_token")
+        print("      TELEGRAM_API_ID=seu_api_id  (obrigatório mesmo com bot_token)")
+        print("      TELEGRAM_API_HASH=seu_api_hash  (obrigatório mesmo com bot_token)")
+        print("\nOpção 2 - API ID/API Hash:")
+        print("   1. Acesse https://my.telegram.org/apps")
+        print("   2. Faça login com sua conta do Telegram")
+        print("   3. Crie um aplicativo e copie o API ID e API Hash")
+        print("   4. Configure no arquivo .env:")
+        print("      TELEGRAM_API_ID=seu_api_id")
+        print("      TELEGRAM_API_HASH=seu_api_hash")
         return
-    
-    try:
-        api_id = int(api_id)
-    except ValueError:
-        print("❌ Erro: TELEGRAM_API_ID deve ser um número!")
-        return
-    
-    # Conectar ao Telegram
-    client = TelegramClient(api_id, api_hash)
     
     try:
         await client.connect()
     except Exception as e:
         error_str = str(e).lower()
-        # Verificar se é erro de sessão locked
-        if "locked" in error_str or "database is locked" in error_str:
-            print("\n⚠️  Sessão bloqueada detectada!")
+        error_msg = str(e)
+        
+        # Verificar se é erro de sessão locked ou auth key not found
+        is_session_error = (
+            "locked" in error_str or 
+            "database is locked" in error_str or
+            "auth key not found" in error_str or
+            "auth key" in error_str or
+            "404" in error_msg or
+            "transport error" in error_str or
+            "server sent transport error" in error_str
+        )
+        
+        if is_session_error:
+            print("\n⚠️  Erro de sessão detectado!")
+            print(f"   Erro: {error_msg}")
             print("🧹 Limpando sessão automaticamente...")
             print("=" * 60)
             

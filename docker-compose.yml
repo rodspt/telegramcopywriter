@@ -39,6 +39,7 @@ services:
       - telegram-network
     environment:
       DATABASE_URL: postgresql://telegram_user:telegram_pass@postgres:5432/telegram_videos
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
     volumes:
