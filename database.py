@@ -21,6 +21,7 @@ class Video(Base):
     file_path = Column(String)
     file_size = Column(BigInteger)  # em bytes (suporta arquivos grandes)
     description = Column(Text, nullable=True)
+    image_path = Column(String, nullable=True)
     downloaded_at = Column(DateTime, default=datetime.utcnow)
     message_date = Column(DateTime)
     is_downloaded = Column(Boolean, default=False)

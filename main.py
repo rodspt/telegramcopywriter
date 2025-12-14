@@ -95,7 +95,23 @@ async def main():
                     
                     # Buscar vídeos do período
                     print(f"\n🔍 Buscando vídeos de {start_date.date()} até {end_date.date()}...")
-                    video_messages, filtered_messages = await downloader.list_videos_by_date(start_date, end_date)
+                    try:
+                        video_messages, filtered_messages = await downloader.list_videos_by_date(start_date, end_date)
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        print(f"\n❌ Erro ao buscar vídeos: {e}")
+                        
+                        # Verificar se é erro de acesso ao canal
+                        if "peer id invalid" in error_str or "chat not found" in error_str or "not found" in error_str or "invalid" in error_str:
+                            print("\n💡 Possíveis soluções:")
+                            print("   1. Verifique se você tem acesso ao canal")
+                            print("   2. Execute: docker-compose run --rm app python list_channels.py")
+                            print("   3. Verifique se o ID do canal está correto no .env")
+                            print(f"      Canal configurado: {CHANNEL_NAME}")
+                        else:
+                            import traceback
+                            traceback.print_exc()
+                        continue
                     
                     if not video_messages:
                         print("❌ Nenhum vídeo encontrado no período especificado.")
@@ -139,8 +155,11 @@ async def main():
                             
                             for idx, video_msg in enumerate(video_messages, 1):
                                 # Buscar descrição para exibir como título
-                                description = await downloader.get_description_from_previous_message(filtered_messages, video_msg)
-                                title = downloader.extract_video_title(description)
+                                description_result = await downloader.get_description_from_previous_message(filtered_messages, video_msg)
+                                description = None
+                                if description_result:
+                                    description, _ = description_result
+                                title = downloader.extract_video_title(description) if description else None
                                 date_str = video_msg.date.strftime("%d/%m/%Y")
                                 
                                 # Formatar exibição: "Data: DD/MM/YYYY - TÍTULO"
@@ -223,8 +242,15 @@ async def main():
                         await downloader.download_videos_by_date(start_date, end_date)
                         # Voltar ao menu principal após concluir
                         
-                except ValueError:
-                    print("❌ Erro: Formato de data inválido! Use DD/MM/YYYY")
+                except ValueError as e:
+                    # Verificar se é erro de parsing de data ou outro ValueError
+                    error_msg = str(e)
+                    if "time data" in error_msg.lower() or "does not match format" in error_msg.lower():
+                        print("❌ Erro: Formato de data inválido! Use DD/MM/YYYY")
+                    else:
+                        print(f"❌ Erro: {e}")
+                        import traceback
+                        traceback.print_exc()
             elif choice == "2":
                 await downloader.download_all_videos()
             else:

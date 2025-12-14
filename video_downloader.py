@@ -1,7 +1,7 @@
 import asyncio
 import re
 from datetime import datetime, timedelta, time
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 from pyrogram.types import Message
 from pyrogram import Client
 from database import SessionLocal, Video, init_db
@@ -59,8 +59,9 @@ class VideoDownloader:
         text = " ".join(description.split())
         return text[:100]
 
-    async def get_description_from_previous_message(self, all_messages: List[Message], video_message: Message) -> Optional[str]:
-        """Busca descrição na mensagem anterior ao vídeo (considerando todas as mensagens)"""
+    async def get_description_from_previous_message(self, all_messages: List[Message], video_message: Message) -> Optional[Tuple[str, Message]]:
+        """Busca descrição na mensagem anterior ao vídeo (considerando todas as mensagens)
+        Retorna uma tupla (descrição, mensagem) ou None se não encontrar"""
         # Encontrar o índice do vídeo na lista completa de mensagens
         video_index = None
         for idx, msg in enumerate(all_messages):
@@ -99,7 +100,7 @@ class VideoDownloader:
             )
             
             if has_text and is_not_video:
-                return message_text
+                return (message_text, next_message)
         
         # Se não encontrou nas mensagens mais antigas, tentar nas mais recentes (índice menor)
         for i in range(1, min(6, video_index + 1)):
@@ -121,7 +122,7 @@ class VideoDownloader:
             )
             
             if has_text and is_not_video:
-                return message_text
+                return (message_text, prev_message)
         
         return None
 
@@ -129,9 +130,17 @@ class VideoDownloader:
         """Baixa todos os vídeos do canal"""
         print(f"📥 Iniciando download de todos os vídeos do canal {self.channel_name}...")
         
+        # Resolver o chat primeiro para garantir que o peer está disponível
+        try:
+            chat = await self._resolve_chat()
+            chat_id = chat.id
+        except Exception as e:
+            print(f"❌ Erro ao resolver chat/canal: {e}")
+            return
+        
         # Buscar todas as mensagens (não apenas vídeos) para encontrar descrições
         all_messages = []
-        async for message in self.client.get_chat_history(self.channel_name):
+        async for message in self.client.get_chat_history(chat_id):
             all_messages.append(message)
         video_messages = [msg for msg in all_messages if msg.video or (msg.document and msg.document.mime_type and "video" in msg.document.mime_type)]
         
@@ -152,12 +161,24 @@ class VideoDownloader:
                 continue
             
             # Buscar descrição na mensagem anterior (de todas as mensagens)
-            description = await self.get_description_from_previous_message(all_messages, message)
-            title = self.extract_video_title(description) or f"Vídeo {message.id}"
+            description_result = await self.get_description_from_previous_message(all_messages, message)
+            description = None
+            description_message = None
+            if description_result:
+                description, description_message = description_result
+            
+            title = self.extract_video_title(description) if description else f"Vídeo {message.id}"
             
             # Baixar vídeo
             print(f"⬇️  Baixando: {title[:60]}{'...' if len(title) > 60 else ''}")
             file_path = await self._download_video(message, title)
+            
+            # Baixar imagem da descrição (se houver)
+            image_path = None
+            if description_message:
+                image_path = await self._download_image(description_message, title)
+                if image_path:
+                    print(f"🖼️  Imagem baixada: {os.path.basename(image_path)}")
             
             if file_path:
                 # Salvar informações no banco
@@ -171,6 +192,7 @@ class VideoDownloader:
                     file_path=file_path,
                     file_size=video_info.file_size if hasattr(video_info, 'file_size') else 0,
                     description=description,
+                    image_path=image_path,
                     message_date=message.date,
                     is_downloaded=True,
                     file_unique_id=file_unique_id
@@ -187,10 +209,61 @@ class VideoDownloader:
         print(f"\n📊 Resumo: {downloaded} vídeos baixados, {skipped} pulados")
         self.db.close()
 
+    async def _resolve_chat(self):
+        """Resolve o chat/canal antes de buscar mensagens"""
+        # Normalizar o channel_name para int se possível
+        try:
+            channel_id = int(self.channel_name)
+        except (ValueError, TypeError):
+            channel_id = None
+        
+        try:
+            # Tentar obter informações do chat para forçar resolução do peer
+            chat = await self.client.get_chat(self.channel_name)
+            print(f"✅ Chat resolvido: {chat.title or 'Sem título'} (ID: {chat.id}, Tipo: {chat.type.name if hasattr(chat.type, 'name') else chat.type})")
+            return chat
+        except Exception as e:
+            error_str = str(e).lower()
+            if "peer id invalid" in error_str or "chat not found" in error_str or "not found" in error_str:
+                # Tentar resolver usando get_dialogs primeiro
+                print("⚠️  Tentando resolver chat através dos diálogos...")
+                try:
+                    async for dialog in self.client.get_dialogs():
+                        # Comparar IDs (tanto int quanto string)
+                        chat_id = dialog.chat.id
+                        if (channel_id is not None and chat_id == channel_id) or \
+                           (str(chat_id) == str(self.channel_name)) or \
+                           (chat_id == self.channel_name):
+                            print(f"✅ Chat encontrado nos diálogos: {dialog.chat.title or 'Sem título'} (ID: {chat_id})")
+                            return dialog.chat
+                    
+                    # Se não encontrou, tentar novamente com get_chat usando o ID normalizado
+                    if channel_id is not None:
+                        print(f"⚠️  Tentando novamente com ID normalizado: {channel_id}")
+                        try:
+                            chat = await self.client.get_chat(channel_id)
+                            print(f"✅ Chat resolvido com ID normalizado: {chat.title or 'Sem título'}")
+                            return chat
+                        except Exception:
+                            pass
+                            
+                except Exception as dialog_error:
+                    print(f"⚠️  Erro ao buscar diálogos: {dialog_error}")
+            
+            raise ValueError(f"Não foi possível resolver o chat/canal '{self.channel_name}': {e}")
+
     async def list_videos_by_date(self, start_date: datetime, end_date: Optional[datetime] = None) -> tuple[List[Message], List[Message]]:
         """Lista vídeos encontrados em um período específico (sem baixar)"""
         if end_date is None:
             end_date = datetime.now()
+        
+        # Resolver o chat primeiro para garantir que o peer está disponível
+        try:
+            chat = await self._resolve_chat()
+            # Usar o ID do chat resolvido
+            chat_id = chat.id
+        except Exception as e:
+            raise ValueError(f"Erro ao resolver chat/canal: {e}")
         
         # Converter datas para timestamp Unix para comparação
         start_timestamp = int(start_date.timestamp())
@@ -207,7 +280,7 @@ class VideoDownloader:
         # Buscar todas as mensagens até a data de fim (incluindo 1 dia antes para títulos)
         # O Pyrogram get_chat_history com offset_date retorna mensagens até aquela data (em ordem decrescente)
         all_messages = []
-        async for message in self.client.get_chat_history(self.channel_name, offset_date=end_date_with_time):
+        async for message in self.client.get_chat_history(chat_id, offset_date=end_date_with_time):
             msg_timestamp = int(message.date.timestamp())
             # Se a mensagem é anterior ao início da busca expandida, parar
             if msg_timestamp < search_start_timestamp:
@@ -259,12 +332,24 @@ class VideoDownloader:
                 continue
             
             # Buscar descrição na mensagem anterior (de todas as mensagens filtradas)
-            description = await self.get_description_from_previous_message(filtered_messages, message)
-            title = self.extract_video_title(description) or f"Vídeo {message.id}"
+            description_result = await self.get_description_from_previous_message(filtered_messages, message)
+            description = None
+            description_message = None
+            if description_result:
+                description, description_message = description_result
+            
+            title = self.extract_video_title(description) if description else f"Vídeo {message.id}"
             
             # Baixar vídeo
             print(f"⬇️  Baixando: {title[:60]}{'...' if len(title) > 60 else ''}")
             file_path = await self._download_video(message, title)
+            
+            # Baixar imagem da descrição (se houver)
+            image_path = None
+            if description_message:
+                image_path = await self._download_image(description_message, title)
+                if image_path:
+                    print(f"🖼️  Imagem baixada: {os.path.basename(image_path)}")
             
             if file_path:
                 # Salvar informações no banco
@@ -278,6 +363,7 @@ class VideoDownloader:
                     file_path=file_path,
                     file_size=video_info.file_size if hasattr(video_info, 'file_size') else 0,
                     description=description,
+                    image_path=image_path,
                     message_date=message.date,
                     is_downloaded=True,
                     file_unique_id=file_unique_id
@@ -306,12 +392,24 @@ class VideoDownloader:
             return existing.file_path
         
         # Buscar descrição na mensagem anterior
-        description = await self.get_description_from_previous_message(all_messages, video_message)
-        title = self.extract_video_title(description) or f"Vídeo {video_message.id}"
+        description_result = await self.get_description_from_previous_message(all_messages, video_message)
+        description = None
+        description_message = None
+        if description_result:
+            description, description_message = description_result
+        
+        title = self.extract_video_title(description) if description else f"Vídeo {video_message.id}"
         
         # Baixar vídeo
         print(f"⬇️  Baixando: {title[:60]}{'...' if len(title) > 60 else ''}")
         file_path = await self._download_video(video_message, title)
+        
+        # Baixar imagem da descrição (se houver)
+        image_path = None
+        if description_message:
+            image_path = await self._download_image(description_message, title)
+            if image_path:
+                print(f"🖼️  Imagem baixada: {os.path.basename(image_path)}")
         
         if file_path:
             # Salvar informações no banco
@@ -325,6 +423,7 @@ class VideoDownloader:
                 file_path=file_path,
                 file_size=video_info.file_size if hasattr(video_info, 'file_size') else 0,
                 description=description,
+                image_path=image_path,
                 message_date=video_message.date,
                 is_downloaded=True,
                 file_unique_id=file_unique_id
@@ -402,3 +501,41 @@ class VideoDownloader:
             return None
         
         return None
+
+    async def _download_image(self, message: Message, title: str = "") -> Optional[str]:
+        """Baixa a imagem de uma mensagem (se houver)"""
+        # Verificar se a mensagem tem foto ou imagem
+        if not message.photo and not (message.document and message.document.mime_type and message.document.mime_type.startswith("image/")):
+            return None
+        
+        # Determinar extensão
+        ext = ".jpg"  # Padrão para fotos do Telegram
+        if message.document:
+            # Tentar obter extensão do nome do arquivo
+            if message.document.file_name:
+                _, file_ext = os.path.splitext(message.document.file_name)
+                if file_ext:
+                    ext = file_ext
+        
+        # Criar nome do arquivo baseado no título
+        if title and title.strip():
+            # Limpar título para usar como nome de arquivo
+            safe_title = re.sub(r'[<>:"/\\|?*]', '', title)
+            safe_title = re.sub(r'\s+', '_', safe_title.strip())
+            # Limitar tamanho do nome (reservar espaço para extensão)
+            max_length = 200 - len(ext) - 7  # -7 para "_image"
+            if len(safe_title) > max_length:
+                safe_title = safe_title[:max_length]
+            file_name = f"{safe_title}_image{ext}"
+        else:
+            # Se não houver título, usar ID da mensagem
+            file_name = f"image_{message.id}{ext}"
+        
+        file_path = os.path.join(self.videos_path, file_name)
+        
+        try:
+            await message.download(file_path)
+            return file_path
+        except Exception as e:
+            print(f"\n⚠️  Erro ao baixar imagem: {e}")
+            return None
