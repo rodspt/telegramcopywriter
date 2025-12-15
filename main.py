@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from telegram_client import TelegramClient
 from video_downloader import VideoDownloader
 from clear_session import clear_session
+from repost_video import repost_to_dramaflix
+from database import SessionLocal, Video
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -235,31 +237,93 @@ async def main():
                             
                             # Baixar vídeo selecionado
                             selected_video = video_messages[video_index]
-                            await downloader.download_single_video(selected_video, filtered_messages)
+                            file_path = await downloader.download_single_video(selected_video, filtered_messages)
                             
-                            # Perguntar se deseja baixar mais algum
+                            # Obter informações do vídeo baixado para republicação
+                            video_info = None
+                            if file_path:
+                                db = SessionLocal()
+                                try:
+                                    # Buscar pelo message_id do vídeo selecionado
+                                    video_info = db.query(Video).filter(
+                                        Video.message_id == selected_video.id
+                                    ).first()
+                                finally:
+                                    db.close()
+                            
+                            # Perguntar o que deseja fazer
                             print("\n" + "=" * 60)
-                            print("Deseja baixar mais algum vídeo?")
-                            print("1. Sim")
-                            print("2. Não")
+                            print("O que deseja fazer?")
+                            print("1. Baixar mais algum vídeo")
+                            print("2. Não (voltar ao menu principal)")
+                            print("3. Republicar este vídeo no DramaFlix")
                             
                             while True:
                                 try:
-                                    download_more = input("Escolha (1 ou 2) [2]: ").strip()
+                                    download_more = input("Escolha (1, 2 ou 3) [2]: ").strip()
                                 except KeyboardInterrupt:
                                     print("\n\n⚠️  Operação cancelada pelo usuário.")
                                     download_more = "2"
                                     break
                                 
-                                if download_more in ["1", "2", ""]:
+                                if download_more in ["1", "2", "3", ""]:
                                     # Se vazio, usar padrão "2" (Não)
                                     if download_more == "":
                                         download_more = "2"
                                     break
                                 else:
-                                    print("❌ Opção inválida! Por favor, escolha 1 ou 2.")
+                                    print("❌ Opção inválida! Por favor, escolha 1, 2 ou 3.")
                             
-                            if download_more != "1":
+                            if download_more == "3":
+                                # Republicar vídeo no DramaFlix
+                                if file_path and os.path.exists(file_path):
+                                    print("\n" + "=" * 60)
+                                    print("📤 Republicando vídeo no DramaFlix...")
+                                    print("=" * 60)
+                                    
+                                    description = video_info.description if video_info else None
+                                    image_path = video_info.image_path if video_info else None
+                                    
+                                    success = await repost_to_dramaflix(
+                                        video_path=file_path,
+                                        description=description,
+                                        image_path=image_path
+                                    )
+                                    
+                                    if success:
+                                        print("✅ Vídeo republicado com sucesso no DramaFlix!")
+                                    else:
+                                        print("❌ Falha ao republicar vídeo.")
+                                    
+                                    # Perguntar novamente o que deseja fazer
+                                    print("\n" + "=" * 60)
+                                    print("O que deseja fazer agora?")
+                                    print("1. Baixar mais algum vídeo")
+                                    print("2. Não (voltar ao menu principal)")
+                                    
+                                    while True:
+                                        try:
+                                            next_action = input("Escolha (1 ou 2) [2]: ").strip()
+                                        except KeyboardInterrupt:
+                                            print("\n\n⚠️  Operação cancelada pelo usuário.")
+                                            next_action = "2"
+                                            break
+                                        
+                                        if next_action in ["1", "2", ""]:
+                                            if next_action == "":
+                                                next_action = "2"
+                                            break
+                                        else:
+                                            print("❌ Opção inválida! Por favor, escolha 1 ou 2.")
+                                    
+                                    if next_action != "1":
+                                        break
+                                else:
+                                    print("❌ Erro: Vídeo não foi baixado ou arquivo não encontrado!")
+                                    print("   É necessário baixar o vídeo antes de republicar.")
+                                    # Continuar para perguntar se quer baixar mais
+                                    continue
+                            elif download_more != "1":
                                 # Voltar ao menu principal
                                 break
                                 

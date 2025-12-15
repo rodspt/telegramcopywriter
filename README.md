@@ -48,12 +48,12 @@ docker-compose run --rm app python list_channels.py
 O script irá:
 - Listar todos os canais que você faz parte
 - Mostrar o **ID** e **Username** (se houver) de cada canal
-- Exibir informações como: `ID: -1002402375685` ou `Username: @canal_exemplo`
+- Exibir informações como: `ID: -45545484` ou `Username: @canal_exemplo`
 
 **Copie o ID ou username** do canal desejado e adicione no arquivo `.env`:
 
 - Se o canal tiver username: `TELEGRAM_CHANNEL_NAME=@canal_exemplo`
-- Se o canal não tiver username: `TELEGRAM_CHANNEL_NAME=-1002402375685` (use o ID numérico)
+- Se o canal não tiver username: `TELEGRAM_CHANNEL_NAME=-45545484` (use o ID numérico)
 
 ### 4. Construir e executar
 
@@ -127,7 +127,7 @@ docker-compose exec postgres psql -U telegram_user -d telegram_videos
 SELECT * FROM videos;
 
 # Consultar vídeos por canal (use o ID ou nome do canal)
-SELECT * FROM videos WHERE channel_name = '-1002402375685';
+SELECT * FROM videos WHERE channel_name = '-45545484';
 
 # Consultar vídeos baixados hoje
 SELECT * FROM videos WHERE DATE(downloaded_at) = CURRENT_DATE;
