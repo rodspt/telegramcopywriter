@@ -32,6 +32,8 @@ async def main():
     print("📱 Telegram Video Downloader")
     print("=" * 60)
     
+    # Verificar tempo antes de conectar (já feito no telegram_client)
+    
     # Obter credenciais do Telegram
     api_id = os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TELEGRAM_API_HASH")
@@ -58,6 +60,44 @@ async def main():
         await client.connect()
     except Exception as e:
         error_str = str(e).lower()
+        error_msg = str(e)
+        
+        # Verificar se é erro de sincronização de tempo
+        if "msg_id is too high" in error_str or "client time has to be synchronized" in error_str or "badmsgnotification" in error_str or "17" in error_str:
+            print("\n❌ Erro de sincronização de tempo detectado!")
+            print("=" * 60)
+            print("🔧 Solução automática: limpando sessão corrompida...")
+            print("=" * 60)
+            
+            # Limpar a sessão automaticamente
+            clear_session(client.session_name)
+            
+            print("\n✅ Sessão limpa com sucesso!")
+            print("\n📋 SOLUÇÕES PARA TENTAR:")
+            print("=" * 60)
+            print("1. AGUARDE 2-3 MINUTOS e tente novamente")
+            print("   (Às vezes o problema se resolve sozinho)")
+            print()
+            print("2. Atualize o Pyrogram:")
+            print("   docker-compose exec app pip install --upgrade pyrogram")
+            print("   # Ou no host: pip install --upgrade pyrogram")
+            print()
+            print("3. Sincronize o tempo do HOST:")
+            print("   sudo ntpdate -s time.nist.gov")
+            print("   # Ou: sudo timedatectl set-ntp true")
+            print()
+            print("4. Limpe TODAS as sessões manualmente:")
+            print("   rm -rf sessions/*.session*")
+            print()
+            print("5. Execute novamente:")
+            print("   docker-compose run --rm app python main.py")
+            print("=" * 60)
+            print("\n💡 NOTA: Este erro pode ser temporário dos servidores do Telegram.")
+            print("   Se persistir após todas as tentativas, aguarde algumas horas")
+            print("   e tente novamente.")
+            print("=" * 60)
+            return
+        
         # Verificar se é erro de sessão locked
         if "locked" in error_str or "database is locked" in error_str:
             print("\n⚠️  Sessão bloqueada detectada!")
@@ -90,11 +130,12 @@ async def main():
             print("=" * 60)
             print("1. Baixar vídeos por data")
             print("2. Baixar todo o conteúdo do canal")
+            print("3. Publicar vídeos")
             print("0. Sair")
             print("=" * 60)
             
             try:
-                choice = input("\nEscolha uma opção (0, 1 ou 2): ").strip()
+                choice = input("\nEscolha uma opção (0, 1, 2 ou 3): ").strip()
             except KeyboardInterrupt:
                 print("\n\n⚠️  Operação cancelada pelo usuário.")
                 choice = "0"
@@ -343,8 +384,100 @@ async def main():
                         traceback.print_exc()
             elif choice == "2":
                 await downloader.download_all_videos()
+            elif choice == "3":
+                # Publicar vídeos
+                db = SessionLocal()
+                try:
+                    # Buscar todos os vídeos baixados
+                    videos = db.query(Video).filter(
+                        Video.is_downloaded == True
+                    ).order_by(Video.downloaded_at.desc()).all()
+                    
+                    if not videos:
+                        print("\n❌ Nenhum vídeo baixado encontrado!")
+                        print("   Baixe vídeos primeiro usando as opções 1 ou 2.")
+                        continue
+                    
+                    print("\n" + "=" * 60)
+                    print("📋 Vídeos disponíveis para publicação:")
+                    print("=" * 60)
+                    
+                    # Códigos ANSI para cores
+                    RED = "\033[31m"
+                    RESET = "\033[0m"
+                    
+                    for idx, video in enumerate(videos, 1):
+                        title = video.description[:60] + "..." if video.description and len(video.description) > 60 else (video.description or f"Vídeo {video.message_id}")
+                        date_str = video.downloaded_at.strftime("%d/%m/%Y %H:%M") if video.downloaded_at else "N/A"
+                        file_exists = "✅" if video.file_path and os.path.exists(video.file_path) else "❌"
+                        print(f"{RED}{idx}{RESET}. {file_exists} {date_str} - {title}")
+                    
+                    print("=" * 60)
+                    
+                    # Solicitar escolha do vídeo
+                    while True:
+                        try:
+                            video_choice = input(f"\nEscolha o número do vídeo para publicar (1-{len(videos)}) ou 0 para voltar: ").strip()
+                        except KeyboardInterrupt:
+                            print("\n\n⚠️  Operação cancelada pelo usuário.")
+                            break
+                        
+                        try:
+                            video_index = int(video_choice) - 1
+                            
+                            if video_index < 0:
+                                # Voltar ao menu principal
+                                break
+                            
+                            if video_index >= len(videos):
+                                print(f"❌ Opção inválida! Escolha um número entre 1 e {len(videos)} ou 0 para voltar.")
+                                continue
+                            
+                            # Opção válida, sair do loop
+                            break
+                            
+                        except ValueError:
+                            print(f"❌ Erro: Número inválido! Escolha um número entre 1 e {len(videos)} ou 0 para voltar.")
+                    
+                    # Se o usuário cancelou (KeyboardInterrupt), sair do loop
+                    try:
+                        video_index
+                    except NameError:
+                        continue
+                    
+                    if video_index < 0:
+                        # Voltar ao menu principal
+                        continue
+                    
+                    # Vídeo selecionado
+                    selected_video = videos[video_index]
+                    
+                    # Verificar se o arquivo existe
+                    if not selected_video.file_path or not os.path.exists(selected_video.file_path):
+                        print(f"\n❌ Erro: Arquivo do vídeo não encontrado: {selected_video.file_path}")
+                        print("   O arquivo pode ter sido movido ou deletado.")
+                        continue
+                    
+                    # Publicar vídeo
+                    print("\n" + "=" * 60)
+                    print("📤 Publicando vídeo no DramaFlix...")
+                    print("=" * 60)
+                    
+                    success = await repost_to_dramaflix(
+                        video_path=selected_video.file_path,
+                        description=selected_video.description,
+                        image_path=selected_video.image_path
+                    )
+                    
+                    if success:
+                        print("✅ Vídeo publicado com sucesso no DramaFlix!")
+                    else:
+                        print("❌ Falha ao publicar vídeo.")
+                        
+                finally:
+                    db.close()
             else:
-                print("❌ Opção inválida! Por favor, escolha 0, 1 ou 2.")
+                print("❌ Opção inválida! Por favor, escolha 0, 1, 2 ou 3.")
                 continue
     
     except KeyboardInterrupt:
